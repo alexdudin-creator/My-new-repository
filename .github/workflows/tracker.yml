@@ -1,26 +1,29 @@
 name: RBC460 Tracker
-
 on:
   schedule:
-    - cron: "0 3 * * *"   # 23:00 по Торонто = 03:00 UTC
+    - cron: '0 23 * * *' # каждый день в 23:00 по UTC-5 (Торонто)
   workflow_dispatch:
 
 jobs:
-  run:
+  track:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: 3.10
 
       - name: Install dependencies
         run: |
-          pip install requests beautifulsoup4 pandas openpyxl lxml
+          pip install pandas openpyxl selenium
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Install ChromeDriver
+        uses: nanasess/setup-chromedriver@v1
 
       - name: Run tracker
         env:
@@ -30,8 +33,9 @@ jobs:
         run: |
           python tracker.py
 
-      - name: Save Excel
+      - name: Upload Excel
         uses: actions/upload-artifact@v4
         with:
-          name: rbc460-excel
+          name: rbc460_prices
           path: rbc460_prices.xlsx
+
