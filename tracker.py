@@ -27,7 +27,7 @@ SMTP_PORT = 587
 def get_price():
     """Получаем NAV фонда через Selenium + webdriver-manager"""
     chrome_options = Options()
-    chrome_options.add_argument("--headless=new")  # новый headless, стабильнее
+    chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
@@ -42,38 +42,51 @@ def get_price():
         driver.get(URL)
         print("Страница загружена, ждём NAV...")
 
-        # Ждём любой элемент, содержащий "NAV $" (более надёжно)
-        WebDriverWait(driver, 20).until(
+        # Ждём якорь "NAV $"
+        WebDriverWait(driver, 30).until(
             EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'NAV $')]"))
         )
 
-        # Ищем все элементы с "NAV $", берём первый видимый
-        elements = driver.find_elements(By.XPATH, "//*[contains(text(), 'NAV $')]")
-        for el in elements:
-            if el.is_displayed():
-                text = el.text.strip()
-                break
-        else:
-            # fallback — ищем по data-attribute или классу, если вдруг поменяли текст
-            text = driver.find_element(By.CSS_SELECTOR, "[data-testid*='nav'], [class*='nav'], [class*='Nav']") \
-                         .text
+        # Находим якорь
+        anchor = driver.find_element(By.XPATH, "//*[contains(text(), 'NAV $')]")
+        print(f"Найден якорь: '{anchor.text.strip()}'")
 
-        # Извлекаем число после $
-        import re
-        match = re.search(r'NAV \$([\d.,]+)', text)
+        # Ищем цену в следующем sibling-элементе (текущая структура сайта)
+        try:
+            price_element = anchor.find_element(By.XPATH, "following-sibling::*[1]")
+            price_text = price_element.text.strip()
+            print(f"Цена из sibling: '{price_text}'")
+            # Проверяем, что это число
+            import re
+            match = re.match(r'^[\d.,]+$', price_text)
+            if match:
+                price = re.sub(r',', '', price_text)  # Убираем запятые
+                print(f"✅ Извлечена цена: {price}")
+                return price
+            else:
+                raise ValueError("Sibling не содержит число")
+        except Exception as sibling_err:
+            print(f"Sibling не найден: {sibling_err}. Fallback на полный текст...")
+
+        # Fallback: полный текст секции + regex
+        section = driver.find_element(By.XPATH, "//*[contains(text(), 'NAV $')]/ancestor::*[contains(@class, 'detail') or contains(@class, 'fund')]")
+        full_text = section.text
+        print(f"Полный текст секции: {full_text[:200]}...")  # Обрезаем для лога
+        match = re.search(r'NAV \$([\d.,]+)', full_text)
         if match:
-            price = match.group(1).replace(',', '')  # убираем запятые в тысячах
+            price = match.group(1).replace(',', '')
+            print(f"✅ Цена из fallback: {price}")
             return price
         else:
-            print("Не удалось распарсить цену из:", text)
+            print("Не удалось распарсить даже из fallback")
             return None
 
     except TimeoutException:
-        print("Таймаут: элемент NAV не появился за 20 сек")
+        print("Таймаут: элемент NAV не появился за 30 сек")
         driver.save_screenshot("timeout_error.png")
         return None
     except Exception as e:
-        print("Ошибка при парсинге:", e)
+        print("Общая ошибка:", e)
         driver.save_screenshot("error.png")
         return None
     finally:
