@@ -27,16 +27,19 @@ jobs:
           pip install pandas openpyxl selenium
 
       # 4️⃣ Устанавливаем Google Chrome
-      - name: Install Chrome
-        uses: browser-actions/setup-chrome@v1
-        with:
-          chrome-version: latest
+      - name: Install Google Chrome
+        run: |
+          wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt install -y ./google-chrome-stable_current_amd64.deb
 
-      # 5️⃣ Устанавливаем ChromeDriver
+      # 5️⃣ Устанавливаем ChromeDriver вручную
       - name: Install ChromeDriver
-        uses: nanasess/setup-chromedriver@v1
-        with:
-          chromedriver-version: latest
+        run: |
+          CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+')
+          CHROME_MAJOR=$(echo $CHROME_VERSION | cut -d. -f1)
+          wget -O /tmp/chromedriver.zip https://chromedriver.storage.googleapis.com/${CHROME_MAJOR}.0.0/chromedriver_linux64.zip
+          unzip /tmp/chromedriver.zip -d /usr/local/bin/
+          chmod +x /usr/local/bin/chromedriver
 
       # 6️⃣ Запускаем tracker.py
       - name: Run tracker
@@ -53,4 +56,3 @@ jobs:
         with:
           name: rbc460_prices
           path: rbc460_prices.xlsx
-
