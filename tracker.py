@@ -1,12 +1,17 @@
-import requests
-from bs4 import BeautifulSoup
-import pandas as pd
+import os
+import time
 from datetime import datetime
+import pandas as pd
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import os
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
+# Настройки
 URL = "https://www.rbcgam.com/en/ca/products/mutual-funds/RBF460/detail"
 FILE_NAME = "rbc460_prices.xlsx"
 
@@ -17,22 +22,36 @@ EMAIL_RECEIVER = os.getenv("EMAIL_RECEIVER")
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
-
 def get_price():
-    headers = {"User-Agent": "Mozilla/5.0"}
-    response = requests.get(URL, headers=headers, timeout=20)
-    soup = BeautifulSoup(response.text, "lxml")
+    """Получаем цену NAV через Selenium"""
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
 
-    text = soup.get_text()
+    driver = webdriver.Chrome(options=chrome_options)
+    driver.get(URL)
 
-    for line in text.split():
-        if line.startswith("$") and "." in line:
-            return line.replace("$", "")
+    try:
+        # Ждём появления элемента с NAV (по тексту "NAV $")
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, "//*[contains(text(),'NAV $')]"))
+        )
+        # Находим текст элемента
+        element = driver.find_element(By.XPATH, "//*[contains(text(),'NAV $')]")
+        text = element.text
+        # Извлекаем число из строки "NAV $37.5962"
+        price = text.split("$")[1].strip()
+    except Exception as e:
+        print("❌ Цена не найдена:", e)
+        price = None
+    finally:
+        driver.quit()
 
-    return None
-
+    return price
 
 def send_email(price):
+    """Отправка Email"""
     msg = MIMEMultipart()
     msg["From"] = EMAIL_SENDER
     msg["To"] = EMAIL_RECEIVER
@@ -47,13 +66,11 @@ def send_email(price):
     server.send_message(msg)
     server.quit()
 
-
 def main():
     price = get_price()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     if price is None:
-        print("❌ Цена не найдена")
         return
 
     if os.path.exists(FILE_NAME):
@@ -65,8 +82,7 @@ def main():
     df.to_excel(FILE_NAME, index=False)
 
     send_email(price)
-    print("✅ Успешно:", now, price)
-
+    print(f"✅ Успешно: {now}, Цена: {price}")
 
 if __name__ == "__main__":
     main()
