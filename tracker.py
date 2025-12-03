@@ -20,14 +20,16 @@ SMTP_PORT = 587
 
 def get_price():
     headers = {"User-Agent": "Mozilla/5.0"}
-    response = requests.get(URL, headers=headers)
+    response = requests.get(URL, headers=headers, timeout=20)
     soup = BeautifulSoup(response.text, "lxml")
 
-    price_tag = soup.find("span", {"class": "nav-value"})
-    if not price_tag:
-        return None
+    text = soup.get_text()
 
-    return price_tag.text.strip().replace("$", "")
+    for line in text.split():
+        if line.startswith("$") and "." in line:
+            return line.replace("$", "")
+
+    return None
 
 
 def send_email(price):
@@ -51,7 +53,7 @@ def main():
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     if price is None:
-        print("Цена не найдена")
+        print("❌ Цена не найдена")
         return
 
     if os.path.exists(FILE_NAME):
@@ -63,7 +65,7 @@ def main():
     df.to_excel(FILE_NAME, index=False)
 
     send_email(price)
-    print("Успешно:", now, price)
+    print("✅ Успешно:", now, price)
 
 
 if __name__ == "__main__":
