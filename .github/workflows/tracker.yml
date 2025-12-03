@@ -26,21 +26,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas openpyxl selenium
 
-      # 4️⃣ Устанавливаем Google Chrome
-      - name: Install Google Chrome
+      # 4️⃣ Устанавливаем Google Chrome и совместимый ChromeDriver
+      - name: Install Chrome and ChromeDriver
         run: |
-          wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-          sudo apt install -y ./google-chrome-stable_current_amd64.deb
+          sudo apt update
+          sudo apt install -y google-chrome-stable chromium-chromedriver
 
-      # 5️⃣ Устанавливаем ChromeDriver корректно
-      - name: Install ChromeDriver
-        run: |
-          LATEST=$(curl -sS https://chromedriver.storage.googleapis.com/LATEST_RELEASE)
-          wget -O /tmp/chromedriver.zip https://chromedriver.storage.googleapis.com/${LATEST}/chromedriver_linux64.zip
-          unzip /tmp/chromedriver.zip -d /usr/local/bin/
-          chmod +x /usr/local/bin/chromedriver
-
-      # 6️⃣ Запускаем tracker.py
+      # 5️⃣ Запускаем tracker.py
       - name: Run tracker
         env:
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
@@ -49,7 +41,7 @@ jobs:
         run: |
           python tracker.py
 
-      # 7️⃣ Загружаем Excel как артефакт
+      # 6️⃣ Загружаем Excel как артефакт
       - name: Upload Excel artifact
         uses: actions/upload-artifact@v4
         with:
