@@ -1,139 +1,128 @@
 # src/get_price.py
 import os
-import io
-from datetime import datetime, timedelta
+from datetime import datetime
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from email.mime.image import MIMEImage
+from email.mime.base import MIMEBase
+from email import encoders
+import pandas as pd
+import yfinance as yf
 import requests
 from bs4 import BeautifulSoup
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-import pandas as pd
-import yfinance as yf  # Для надёжного fallback API
-
-plt.style.use('default')
-plt.rcParams['font.size'] = 10
-plt.rcParams['figure.figsize'] = (8, 4)
+import re
 
 def get_current_price():
-    # Используем yfinance для текущей цены (стабильно)
+    # Сначала пробуем yfinance — самый надёжный источник
     try:
         ticker = yf.Ticker("RBF460.TO")
-        info = ticker.info
-        if 'regularMarketPrice' in info:
-            return str(round(info['regularMarketPrice'], 4))
-        hist = ticker.history(period="1d")
+        hist = ticker.history(period="2d")
         if not hist.empty:
-            return str(round(hist['Close'].iloc[-1], 4))
+            return round(hist['Close'].iloc[-1], 4)
     except:
         pass
-    # Fallback на Globe (как раньше)
-    url = "https://www.theglobeandmail.com/investing/markets/funds/RBF460.CF/"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+    # Fallback на Globe
     try:
+        url = "https://www.theglobeandmail.com/investing/markets/funds/RBF460.CF/"
+        headers = {"User-Agent": "Mozilla/5.0"}
         r = requests.get(url, headers=headers, timeout=15)
         soup = BeautifulSoup(r.text, 'html.parser')
-        text = soup.get_text()
-        import re
-        match = re.search(r'(\d+\.\d{4})\s*CAD', text)
+        match = re.search(r'(\d+\.\d{4})\s*CAD', soup.get_text())
         if match:
-            return match.group(1)
+            return float(match.group(1))
     except:
         pass
-    return "37.73"  # Минимальный fallback
 
-def get_historical_prices():
-    # Основной метод: парсинг таблицы Yahoo
-    url = "https://ca.finance.yahoo.com/quote/RBF460.TO/history?p=RBF460.TO"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Accept-Encoding": "gzip, deflate",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-    }
-    try:
-        r = requests.get(url, headers=headers, timeout=20)
-        r.raise_for_status()
-        dfs = pd.read_html(io.StringIO(r.text))
-        if dfs:
-            df = dfs[0]
-            # Очистка: убираем строки с 'Dividend' или заголовки
-            df = df[~df.iloc[:, 0].astype(str).str.contains('Dividend|Date', na=False)]
-            df.columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']  # Стандартизация колонок
-            df['Date'] = pd.to_datetime(df['Date'])
-            df['Close'] = pd.to_numeric(df['Close'].str.replace(',', ''), errors='coerce')
-            df = df.dropna(subset=['Close']).sort_values('Date').tail(30)  # Последние 30 дней
-            if len(df) >= 5:  # Минимум данных
-                return df['Date'].dt.strftime('%Y-%m-%d').tolist(), df['Close'].round(4).tolist()
-    except Exception as e:
-        print(f"Yahoo parse error: {e}")
+    return 37.73  # последняя известная
 
-    # Fallback 1: yfinance API (надёжно работает)
+def get_history_30_days():
     try:
         ticker = yf.Ticker("RBF460.TO")
-        hist = ticker.history(period="1mo")  # ~30 дней
-        if not hist.empty:
-            hist = hist.sort_index()
-            dates = hist.index.strftime('%Y-%m-%d').tolist()[-30:]
-            prices = hist['Close'].round(4).tolist()[-30:]
-            return dates, prices
+        df = ticker.history(period="40d")  # чуть больше, чтобы точно 30 торговых дней
+        if df.empty:
+            raise Exception("No data")
+        df = df[['Close']].copy()
+        df = df.sort_index().tail(30)  # последние 30 записей
+        df['Дата'] = df.index.strftime('%d.%m.%Y')
+        df['Цена (CAD)'] = df['Close'].round(4)
+        df['Изменение, CAD'] = df['Close'].diff()
+        df['Изменение, %'] = (df['Close'].pct_change() * 100).round(2)
+        df = df[['Дата', 'Цена (CAD)', 'Изменение, CAD', 'Изменение, %']]
+        df.iloc[0, 2:] = 0  # первая строка — без изменения
+        df.iloc[0, 3] = 0.00
+        return df
     except Exception as e:
-        print(f"yfinance error: {e}")
+        print(f"Ошибка получения истории: {e}")
+        # Резервный вариант — пустая таблица с текущей ценой
+        today = datetime.now().strftime('%d.%m.%Y')
+        price = get_current_price()
+        data = {
+            'Дата': [today],
+            'Цена (CAD)': [price],
+            'Изменение, CAD': [0],
+            'Изменение, %': [0.00]
+        }
+        return pd.DataFrame(data)
 
-    # Fallback 2: Минимальный (только если всё упало — сгенерируем реалистичные, но без жёстких цен)
-    today = datetime.now()
-    dates = [(today - timedelta(days=i)).strftime('%Y-%m-%d') for i in range(29, -1, -1)]
-    base_price = 37.5
-    import random
-    prices = [round(base_price + random.uniform(-0.3, 0.3) + (i * random.uniform(-0.01, 0.01)), 4) for i in range(30)]
-    prices[-1] = float(get_current_price())  # Текущая цена в конце
-    return dates, prices
+def create_excel_file(df):
+    today_str = datetime.now().strftime('%d.%m.%Y')
+    filename = f"RBF460_history_{today_str}.xlsx"
+    
+    with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name='RBF460.CF', index=False)
+        worksheet = writer.sheets['RBF460.CF']
+        # Форматирование
+        from openpyxl.styles import Font, Alignment, PatternFill
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="2e86ab", end_color="2e86ab", fill_type="solid")
+        for cell in worksheet[1]:
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center")
+        # Автоширина колонок
+        for column in worksheet.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            worksheet.column_dimensions[column_letter].width = adjusted_width
 
-def create_chart_image(dates, prices):
-    dates_dt = [datetime.strptime(d, '%Y-%m-%d') for d in dates]
-    fig, ax = plt.subplots()
-    ax.plot(dates_dt, prices, color='#2e86ab', linewidth=2.8, marker='o', markersize=4)
-    ax.set_title('RBF460.CF — NAV за последние 30 дней', fontsize=14, pad=20)
-    ax.set_ylabel('CAD')
-    ax.grid(True, alpha=0.3)
-    ax.xaxis.set_major_locator(mdates.DayLocator(interval=5))
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%d %b'))
-    plt.xticks(rotation=45)
-    plt.tight_layout()
+    return filename
 
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png', dpi=160, facecolor='white', bbox_inches='tight')
-    buf.seek(0)
-    plt.close()
-    return buf
-
-def send_email(price, chart_buf):
-    msg = MIMEMultipart("related")
+def send_email_with_excel(excel_filename, current_price):
+    msg = MIMEMultipart()
     msg["From"] = os.getenv("SMTP_USER")
     msg["To"] = "alex.dudin@gmail.com"
-    msg["Subject"] = f"RBF460.CF — {price} CAD — {datetime.now().strftime('%d.%m.%Y')}"
+    msg["Subject"] = f"RBF460.CF — {current_price} CAD — {datetime.now().strftime('%d.%m.%Y')}"
 
     html = f"""
     <h2>Ежедневный отчёт по RBC Select Balanced Portfolio</h2>
     <p><strong>Тикер:</strong> RBF460.CF</p>
-    <p style="font-size: 32px; color: #2e86ab; margin: 15px 0;"><strong>{price}</strong> CAD</p>
+    <p style="font-size: 32px; color: #2e86ab; margin: 15px 0;"><strong>{current_price}</strong> CAD</p>
     <p>Время получения: {datetime.now().strftime('%d %B %Y, %H:%M')} (Toronto time)</p>
-    <br>
-    <img src="cid:price_chart" style="max-width:100%; border-radius:10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-    <br><br>
-    <small>Источник: Yahoo Finance / yfinance API • Автоматический отчёт от GitHub Actions</small>
+    <p>Во вложении — история цен за последние 30 дней в Excel.</p>
+    <hr>
+    <small>Автоматический отчёт от GitHub Actions • Источник: Yahoo Finance</small>
     """
 
     msg.attach(MIMEText(html, "html"))
 
-    chart_buf.seek(0)
-    img = MIMEImage(chart_buf.read(), 'png')
-    img.add_header('Content-ID', '<price_chart>')
-    msg.attach(img)
+    # Прикрепляем Excel
+    with open(excel_filename, "rb") as attachment:
+        part = MIMEBase("application", "octet-stream")
+        part.set_payload(attachment.read())
+        encoders.encode_base64(part)
+        part.add_header(
+            "Content-Disposition",
+            f"attachment; filename= {excel_filename}"
+        )
+        msg.attach(part)
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(os.getenv("SMTP_USER"), os.getenv("SMTP_APP_PASSWORD"))
@@ -141,7 +130,7 @@ def send_email(price, chart_buf):
 
 if __name__ == "__main__":
     current_price = get_current_price()
-    dates, prices = get_historical_prices()
-    chart_buf = create_chart_image(dates, prices)
-    send_email(current_price, chart_buf)
-    print(f"Отчёт с графиком отправлен! Цена: {current_price} CAD | Данные дней: {len(dates)}")
+    df = get_history_30_days()
+    excel_file = create_excel_file(df)
+    send_email_with_excel(excel_file, current_price)
+    print(f"Отчёт с Excel отправлен! Цена: {current_price} CAD")
