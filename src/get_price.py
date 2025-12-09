@@ -5,57 +5,34 @@ from datetime import datetime
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+import requests
+from bs4 import BeautifulSoup
 
 def get_rbf460_price():
-    options = Options()
-    options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("--disable-extensions")
-    options.add_argument("--disable-plugins")
-    options.add_argument("--disable-images")
-    options.add_argument("--window-size=1920,1080")
-    options.add_argument("user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36")
-
-    driver = webdriver.Chrome(options=options)
-    wait = WebDriverWait(driver, 30)
+    url = "https://www.theglobeandmail.com/investing/markets/funds/RBF460.CF/"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+    }
 
     try:
-        driver.get("https://www.theglobeandmail.com/auth/sign-in/")
-        time.sleep(4)
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Логин
-        wait.until(EC.element_to_be_clickable((By.NAME, "email"))).send_keys(os.getenv("GLOBE_EMAIL"))
-        driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
-
-        # Пароль
-        wait.until(EC.element_to_be_clickable((By.NAME, "password"))).send_keys(os.getenv("GLOBE_PASSWORD"))
-        driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
-
-        # Ждём полной авторизации и переходим в Watchlist
-        driver.get("https://www.theglobeandmail.com/investing/markets/watchlist/#/my-watchlist")
-        time.sleep(10)  # даём время на загрузку всех скриптов
-
-        # Ждём появления строки с RBF460.CF
-        price_element = wait.until(EC.visibility_of_element_located(
-            (By.XPATH, "//td[contains(text(),'RBF460.CF')]//following-sibling::td[3]//span")
-        ))
-        price = price_element.text.strip().replace(",", "")
-
-        return price
-
+        # Ищем текущую цену (NAV) — обычно в <span> или <strong> рядом с "37.XX CAD"
+        price_elem = soup.find(string=lambda text: text and 'CAD' in text and any(c.isdigit() for c in text) and len(text) < 20)
+        if not price_elem:
+            # Альтернатива: ищем по классу или тексту (адаптировано под структуру 2025)
+            price_elem = soup.find('span', class_='price-value') or soup.find('strong', string=lambda t: t and '.' in t and len(t.split('.')[-1]) == 4)
+        
+        if price_elem:
+            price_text = price_elem.get_text(strip=True).replace('CAD', '').replace(',', '')
+            return price_text
+        else:
+            return "Цена не найдена (проверьте сайт)"
+            
     except Exception as e:
-        return f"ОШИБКА Selenium: {str(e)[:200]}"
-    finally:
-        driver.quit()
+        return f"ОШИБКА Requests: {str(e)[:100]}"
 
 
 def send_email(price):
@@ -69,6 +46,7 @@ def send_email(price):
     <p><strong>Тикер:</strong> RBF460.CF</p>
     <p style="font-size: 28px; color: #2e86ab;"><strong>{price}</strong> CAD</p>
     <p>Время получения: {datetime.now().strftime('%d %B %Y, %H:%M')} (Toronto time)</p>
+    <p><em>Источник: The Globe and Mail (публичные данные NAV)</em></p>
     <hr><small>Автоматический отчёт от GitHub Actions</small>
     """
     msg.attach(MIMEText(body, "html"))
