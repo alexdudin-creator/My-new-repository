@@ -39,7 +39,7 @@ def get_historical_prices():
     url = "https://lt.morningstar.com/api/rest.svc/klr5zyak8x/security_details/v3?languageId=en&currencyId=CAD&securityId=0P0000707F"
     try:
         data = requests.get(url, timeout=15).json()
-        nav_history = data['navHistory'][-30:]  # последние 30 дней
+        nav_history = data['navHistory'][-15:]  # последние 30 дней
         dates = [item['endDate'][:10] for item in nav_history]
         prices = [float(item['nav']) for item in nav_history]
         return dates, prices
