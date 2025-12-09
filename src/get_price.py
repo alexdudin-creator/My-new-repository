@@ -7,33 +7,44 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import requests
 from bs4 import BeautifulSoup
+import yfinance as yf  # Добавь в requirements.txt
 
 def get_rbf460_price():
-    url = "https://www.theglobeandmail.com/investing/markets/funds/RBF460.CF/"
+    # Попытка 1: The Globe and Mail
+    globe_url = "https://www.theglobeandmail.com/investing/markets/funds/RBF460.CF/"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
     }
-
     try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
+        response = requests.get(globe_url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
-
-        # Ищем текущую цену (NAV) — обычно в <span> или <strong> рядом с "37.XX CAD"
-        price_elem = soup.find(string=lambda text: text and 'CAD' in text and any(c.isdigit() for c in text) and len(text) < 20)
-        if not price_elem:
-            # Альтернатива: ищем по классу или тексту (адаптировано под структуру 2025)
-            price_elem = soup.find('span', class_='price-value') or soup.find('strong', string=lambda t: t and '.' in t and len(t.split('.')[-1]) == 4)
         
+        # Ищем цену в возможных местах (расширенный поиск)
+        price_elem = (
+            soup.find('span', class_='price-value') or
+            soup.find('strong', string=lambda t: t and '.' in t and len(t.split('.')[-1]) == 4) or
+            soup.find(string=lambda text: text and any(c.isdigit() for c in text) and 'CAD' in text and len(text) < 20)
+        )
         if price_elem:
-            price_text = price_elem.get_text(strip=True).replace('CAD', '').replace(',', '')
-            return price_text
-        else:
-            return "Цена не найдена (проверьте сайт)"
-            
+            price = price_elem.get_text(strip=True).replace('CAD', '').replace(',', '').strip()
+            if price and '.' in price:
+                return price
     except Exception as e:
-        return f"ОШИБКА Requests: {str(e)[:100]}"
+        print(f"Globe error: {e}")
 
+    # Fallback: Yahoo Finance (надёжный для RBF460.CF)
+    try:
+        ticker = yf.Ticker("RBF460.TO")  # Yahoo использует .TO для TSX
+        info = ticker.info
+        hist = ticker.history(period="1d")
+        if 'regularMarketPrice' in info:
+            return str(info['regularMarketPrice'])[:5]  # Обрезаем до 37.64
+        elif not hist.empty:
+            return str(hist['Close'].iloc[-1])[:5]
+        else:
+            return "Цена не найдена (проверьте API)"
+    except Exception as e:
+        return f"ОШИБКА Fallback: {str(e)[:100]}"
 
 def send_email(price):
     msg = MIMEMultipart()
@@ -46,7 +57,7 @@ def send_email(price):
     <p><strong>Тикер:</strong> RBF460.CF</p>
     <p style="font-size: 28px; color: #2e86ab;"><strong>{price}</strong> CAD</p>
     <p>Время получения: {datetime.now().strftime('%d %B %Y, %H:%M')} (Toronto time)</p>
-    <p><em>Источник: The Globe and Mail (публичные данные NAV)</em></p>
+    <p><em>Источник: The Globe and Mail / Yahoo Finance (NAV на конец дня)</em></p>
     <hr><small>Автоматический отчёт от GitHub Actions</small>
     """
     msg.attach(MIMEText(body, "html"))
@@ -54,7 +65,6 @@ def send_email(price):
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(os.getenv("SMTP_USER"), os.getenv("SMTP_APP_PASSWORD"))
         server.send_message(msg)
-
 
 if __name__ == "__main__":
     price = get_rbf460_price()
