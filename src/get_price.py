@@ -1,8 +1,8 @@
 # src/get_price.py
 import os
 import time
-import smtplib
 from datetime import datetime
+import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -11,7 +11,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 def get_rbf460_price():
     options = Options()
@@ -19,40 +18,45 @@ def get_rbf460_price():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-plugins")
+    options.add_argument("--disable-images")
     options.add_argument("--window-size=1920,1080")
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_argument("user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36")
 
     driver = webdriver.Chrome(options=options)
-    wait = WebDriverWait(driver, 20)
+    wait = WebDriverWait(driver, 30)
 
     try:
         driver.get("https://www.theglobeandmail.com/auth/sign-in/")
-        time.sleep(3)
+        time.sleep(4)
 
-        # Email
-        wait.until(EC.presence_of_element_located((By.NAME, "email"))).send_keys(os.getenv("GLOBE_EMAIL"))
+        # Логин
+        wait.until(EC.element_to_be_clickable((By.NAME, "email"))).send_keys(os.getenv("GLOBE_EMAIL"))
         driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
 
-        # Password
-        wait.until(EC.presence_of_element_located((By.NAME, "password"))).send_keys(os.getenv("GLOBE_PASSWORD"))
+        # Пароль
+        wait.until(EC.element_to_be_clickable((By.NAME, "password"))).send_keys(os.getenv("GLOBE_PASSWORD"))
         driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
 
-        # Переход в Watchlist
-        driver.get("https://www.theglobeandmail.com/investing/markets/watchlist/")
-        time.sleep(8)
+        # Ждём полной авторизации и переходим в Watchlist
+        driver.get("https://www.theglobeandmail.com/investing/markets/watchlist/#/my-watchlist")
+        time.sleep(10)  # даём время на загрузку всех скриптов
 
-        # Поиск RBF460.CF
-        row = wait.until(EC.presence_of_element_located(
-            (By.XPATH, "//td[contains(text(), 'RBF460.CF')]//parent::tr")
+        # Ждём появления строки с RBF460.CF
+        price_element = wait.until(EC.visibility_of_element_located(
+            (By.XPATH, "//td[contains(text(),'RBF460.CF')]//following-sibling::td[3]//span")
         ))
-        price = row.find_element(By.XPATH, ".//td[4]//span").text.strip()
+        price = price_element.text.strip().replace(",", "")
 
-        return price.replace(",", "")
+        return price
 
     except Exception as e:
-        return f"ОШИБКА: {str(e)}"
+        return f"ОШИБКА Selenium: {str(e)[:200]}"
     finally:
         driver.quit()
+
 
 def send_email(price):
     msg = MIMEMultipart()
@@ -63,10 +67,9 @@ def send_email(price):
     body = f"""
     <h2>Ежедневный отчёт по RBC Select Balanced Portfolio</h2>
     <p><strong>Тикер:</strong> RBF460.CF</p>
-    <p style="font-size: 28px; color: #2e86ab;"><strong>{price} CAD</strong></p>
+    <p style="font-size: 28px; color: #2e86ab;"><strong>{price}</strong> CAD</p>
     <p>Время получения: {datetime.now().strftime('%d %B %Y, %H:%M')} (Toronto time)</p>
-    <hr>
-    <small>Автоматический отчёт от GitHub Actions</small>
+    <hr><small>Автоматический отчёт от GitHub Actions</small>
     """
     msg.attach(MIMEText(body, "html"))
 
@@ -74,8 +77,8 @@ def send_email(price):
         server.login(os.getenv("SMTP_USER"), os.getenv("SMTP_APP_PASSWORD"))
         server.send_message(msg)
 
+
 if __name__ == "__main__":
-    print("Запуск получения цены RBF460.CF...")
     price = get_rbf460_price()
     send_email(price)
-    print(f"Цена {price} — отчёт отправлен на alex.dudin@gmail.com")
+    print(f"Готово! Цена RBF460.CF: {price}")
