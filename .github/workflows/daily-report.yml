@@ -1,0 +1,32 @@
+name: Daily RBF460 Report
+
+on:
+  schedule:
+    # 23:00 по Торонто = 04:00 UTC следующего дня (учитываем DST автоматически)
+    - cron: '0 4 * * *'
+  workflow_dispatch:  # можно запустить вручную
+
+jobs:
+  get-and-send:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install selenium==4.17.2
+          sudo apt-get update && sudo apt-get install -y chromium-browser
+
+      - name: Run price scraper and send email
+        env:
+          GLOBE_EMAIL: ${{ secrets.GLOBE_EMAIL }}
+          GLOBE_PASSWORD: ${{ secrets.GLOBE_PASSWORD }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
+        run: |
+          python src/get_price.py
