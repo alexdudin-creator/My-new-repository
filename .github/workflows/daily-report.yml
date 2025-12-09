@@ -2,9 +2,8 @@ name: Daily RBF460 Report
 
 on:
   schedule:
-    # 23:00 по Торонто = 04:00 UTC следующего дня (учитываем DST автоматически)
-    - cron: '0 4 * * *'
-  workflow_dispatch:  # можно запустить вручную
+    - cron: '0 4 * * *'  # 23:00 Toronto
+  workflow_dispatch:
 
 jobs:
   get-and-send:
@@ -19,13 +18,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install selenium==4.17.2
-          sudo apt-get update && sudo apt-get install -y chromium-browser
+          pip install -r requirements.txt
 
       - name: Run price scraper and send email
         env:
-          GLOBE_EMAIL: ${{ secrets.GLOBE_EMAIL }}
-          GLOBE_PASSWORD: ${{ secrets.GLOBE_PASSWORD }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
         run: |
