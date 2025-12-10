@@ -1,7 +1,7 @@
 # src/get_price.py
 import os
-import requests
 import re
+import requests
 from datetime import datetime
 import smtplib
 from email.mime.text import MIMEText
@@ -53,7 +53,7 @@ def choose_best_price(rbc, yahoo, globe):
     if not candidates:
         return "НЕ УДАЛОСЬ ПОЛУЧИТЬ ЦЕНУ", "—"
 
-    # Берём самое свежее/точное (RBC > Yahoo > Globe)
+    # Приоритет: RBC → Yahoo → Globe
     candidates.sort(key=lambda x: ["RBC (официальный)", "Yahoo Finance", "The Globe and Mail"].index(x[1]))
     best_price = f"{candidates[0][0]:.4f}"
     best_source = candidates[0][1]
@@ -75,7 +75,7 @@ def send_email(rbc, yahoo, globe, final_price, final_source):
 
     <h3>Что вернул каждый источник:</h3>
     <table style="width:100%; border-collapse: collapse; font-size: 15px;">
-        <tr style="background:#f5f5f5;">
+        <tr style="background:#f0f8ff;">
             <td style="padding:10px; font-weight:bold;">RBC GAM (официальный)</td>
             <td style="padding:10px;"><strong>{rbc}</strong> CAD</td>
         </tr>
@@ -83,7 +83,7 @@ def send_email(rbc, yahoo, globe, final_price, final_source):
             <td style="padding:10px; font-weight:bold;">Yahoo Finance</td>
             <td style="padding:10px;"><strong>{yahoo}</strong> CAD</td>
         </tr>
-        <tr>
+        <tr style="background:#f0f8ff;">
             <td style="padding:10px; font-weight:bold;">The Globe and Mail</td>
             <td style="padding:10px;"><strong>{globe}</strong> CAD</td>
         </tr>
@@ -104,7 +104,6 @@ def send_email(rbc, yahoo, globe, final_price, final_source):
 if __name__ == "__main__":
     rbc   = get_from_rbc()
     yahoo = get_from_yahoo()
-    = get_from_yahoo()
     globe = get_from_globe()
 
     final_price, final_source = choose_best_price(rbc, yahoo, globe)
