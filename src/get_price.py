@@ -7,26 +7,20 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# Файл с предыдущей ценой — будет в корне репозитория
 PRICE_FILE = "last_price.txt"
 
 def get_current_price():
     url = "https://www.theglobeandmail.com/investing/markets/funds/RBF460.CF/"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
         r = requests.get(url, headers=headers, timeout=15)
         r.raise_for_status()
-        
-        # Ищем числа от 30.0000 до 49.9999 (NAV фонда всегда в этом диапазоне)
         matches = re.findall(r'\b([3-4][0-9]\.\d{4})\b', r.text)
         if matches:
             from collections import Counter
-            price = Counter(matches).most_common(1)[0][0]
-            return float(price)
+            return float(Counter(matches).most_common(1)[0][0])
     except Exception as e:
         print(f"Ошибка получения цены: {e}")
-    
     return None
 
 def read_previous_price():
@@ -46,14 +40,22 @@ def save_current_price(price):
         pass
 
 def commit_and_push():
+    token = os.getenv("GH_TOKEN")
+    if not token:
+        print("GH_TOKEN не найден — push пропущен")
+        return
+    
+    repo = os.getenv("GITHUB_REPOSITORY")  # например alexdudin-creator/My-new-repository
     try:
         os.system('git config --global user.name "GitHub Actions"')
         os.system('git config --global user.email "actions@github.com"')
+        os.system(f'git remote set-url origin https://x-access-token:{token}@github.com/{repo}.git')
         os.system("git add last_price.txt")
-        os.system('git commit -m "Update RBF460 price [skip ci]" || echo "No changes to commit"')
+        os.system('git commit -m "Update RBF460 price [skip ci]" || echo "No changes"')
         os.system("git push")
-    except:
-        pass  # если не вышло — не страшно, в следующий раз получится
+        print("last_price.txt обновлён в репозитории")
+    except Exception as e:
+        print(f"Ошибка push: {e}")
 
 def send_email(current_price, change_cad=None, change_pct=None):
     msg = MIMEMultipart("alternative")
@@ -80,7 +82,7 @@ def send_email(current_price, change_cad=None, change_pct=None):
         {current_price:.4f} CAD
     </p>
     {change_text}
-    <p><em>Источник: The Globe and Mail • NAV на конец торгового дня</em></p>
+    <p><em>Источник: The Globe and Mail • NAV на конец дня</em></p>
     <p>Время получения: {datetime.now().strftime('%d %B %Y, %H:%M')} (Toronto time)</p>
     <hr>
     <small>Автоматический отчёт • GitHub Actions</small>
@@ -107,9 +109,8 @@ if __name__ == "__main__":
             change_cad = current_price - prev_price
             change_pct = (change_cad / prev_price) * 100
         
-        # Сохраняем и коммитим
         save_current_price(current_price)
         commit_and_push()
         
         send_email(current_price, change_cad, change_pct)
-        print(f"Успех! Цена: {current_price:.4f} CAD")
+        print(f"Успех! Текущая цена: {current_price:.4f} CAD")
