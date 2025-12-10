@@ -6,8 +6,10 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import requests
 from bs4 import BeautifulSoup
+import re
 
 def get_rbf460_price():
+    # Источник 1: The Globe and Mail
     url = "https://www.theglobeandmail.com/investing/markets/funds/RBF460.CF/"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
@@ -18,28 +20,40 @@ def get_rbf460_price():
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Точный поиск NAV: ищем в таблицах или span с классами цены (адаптировано под 2025)
+        # Расширенный поиск цены (проверяем больше селекторов)
         price_elem = (
-            soup.find('span', {'data-testid': 'price-value'}) or  # Современный селектор
-            soup.find('td', string=lambda t: t and 'NAV' in t) or  # В таблице NAV
-            soup.find('strong', string=lambda t: t and '.' in t and len(t) < 10) or  # Bold цена
-            next((el for el in soup.find_all(string=lambda text: text and 'CAD' in str(text) and any(c.isdigit() for c in str(text)) and len(str(text)) < 15)), None)
+            soup.find('span', {'data-testid': 'price-value'}) or
+            soup.find('strong', string=lambda t: t and re.match(r'\d+\.\d{4}', str(t))) or
+            soup.find('td', string=lambda t: t and 'NAV' in str(t).upper()) or
+            next((el for el in soup.find_all('span') if re.search(r'\d+\.\d{4}', el.get_text())), None) or
+            next((el for el in soup.find_all(string=lambda text: text and re.search(r'(\d+\.\d{4})\s*CAD', str(text)))), None)
         )
 
         if price_elem:
             price_text = str(price_elem).strip().replace('CAD', '').replace(',', '').replace('$', '')
-            # Извлекаем число вроде 37.4592
-            import re
             match = re.search(r'(\d+\.\d{4})', price_text)
             if match:
                 return match.group(1)
-            else:
-                return price_text.strip()[:7] if '.' in price_text else "37.4592"  # Fallback на известную
-
-        return "37.4592"  # Hardcoded fallback на актуальную NAV (обновляй вручную при необходимости)
 
     except Exception as e:
-        return f"ОШИБКА Requests: {str(e)[:100]} (fallback: 37.4592 CAD)"
+        print(f"Globe error: {e}")
+
+    # Источник 2: Yahoo Finance (fallback, всегда свежий NAV)
+    yahoo_url = "https://ca.finance.yahoo.com/quote/RBF460.TO"
+    try:
+        response = requests.get(yahoo_url, headers=headers, timeout=15)
+        response.raise_for_status()
+        # Ищем в JSON внутри скрипта или в тексте
+        match = re.search(r'"regularMarketPrice":\s*([\d.]+)', response.text)
+        if not match:
+            match = re.search(r'(\d+\.\d{4})\s*CAD', response.text)
+        if match:
+            return str(round(float(match.group(1)), 4))
+    except Exception as e:
+        print(f"Yahoo error: {e}")
+
+    # Если ничего не найдено — ошибка (без хардкода)
+    return f"ОШИБКА: Цена не найдена (проверьте сайт; fallback недоступен)"
 
 def send_email(price):
     msg = MIMEMultipart()
@@ -52,7 +66,7 @@ def send_email(price):
     <p><strong>Тикер:</strong> RBF460.CF</p>
     <p style="font-size: 28px; color: #2e86ab;"><strong>{price}</strong> CAD</p>
     <p>Время получения: {datetime.now().strftime('%d %B %Y, %H:%M')} (Toronto time)</p>
-    <p><em>Источник: The Globe and Mail (NAV на конец дня). Изменение за неделю: +0.11%.</em></p>
+    <p><em>Источник: The Globe and Mail / Yahoo Finance (NAV на конец дня). Если ошибка — проверьте вручную.</em></p>
     <hr><small>Автоматический отчёт от GitHub Actions</small>
     """
     msg.attach(MIMEText(body, "html"))
